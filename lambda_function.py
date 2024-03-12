@@ -6,18 +6,24 @@ from io import StringIO
 s3_client = boto3.client('s3')
 s3_resource = boto3.resource('s3')
 
+sns_client = boto3.client('sns')
+SNS_TOPIC_ARN = "arn:aws:sns:ap-south-1:905418268362:doordash-notify"
+
 def lambda_handler(event, context):
     processed_data, status, filename = process_records(event)
     
     if status == 500:
+        publish_notification("failed", processed_data)
         return {
             'statusCode': 500,
             'body': processed_data
         }
     if processed_data is None or filename is None:
+        message = "Data not found"
+        publish_notification("failed", message)
         return {
             'statusCode': 400,
-            'body': "Data not found"
+            'body': message
         }
     
     return store_in_target_s3(processed_data, filename)
@@ -59,13 +65,25 @@ def store_in_target_s3(processed_data, filename):
         json_buffer = StringIO()
         processed_data.to_json(json_buffer)
         s3_resource.Object(target_bucket, filename).put(Body=json_buffer.getvalue())
+        
+        message = f"Successfully stored the processed file in the target S3 bucket."
+        publish_notification("success", message)
         return {
             'statusCode': 200,
-            'body': f"Successfully stored the processed file in the target S3 bucket."
+            'body': message
         }
+        
     except Exception as e:
         print(str(e))
+        message = f"Error encountered while storing the processed json file to target S3 bucket."
+        publish_notification("failed", message)
         return {
             'statusCode': 500,
-            'body': f"Error encountered while storing the processed json file to target S3 bucket."
+            'body': message
         }
+        
+def publish_notification(result, message):
+    response = sns_client.publish(
+    TopicArn=SNS_TOPIC_ARN,
+    Message=message
+)
